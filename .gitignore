@@ -1,0 +1,5 @@
+# for hpc
+conda/
+mujoco/
+set_env.sh
+output/
