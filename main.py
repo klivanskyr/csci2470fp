@@ -37,20 +37,44 @@ import wandb
 
 # DreamWorld (state, action) -> (next_state, reward)
 class DreamWorld(nn.Module):
-    def __init__(self, state_dim, action_dim, hidden_size=128, reward_dim=1, trajectory_length=15, learning_rate=1e-3, batch_size=32, epochs=100, weight_decay=1e-5, checkpoint_dir="./checkpoints"):
+    def __init__(
+        self, 
+        state_space, 
+        action_space, 
+        hidden_size=128, 
+        reward_dim=1, 
+        trajectory_length=15, 
+        num_trajectories=5, 
+        learning_rate=1e-3, 
+        batch_size=32, 
+        epochs=100, 
+        weight_decay=1e-5, 
+        checkpoint_dir="./checkpoints",
+        device="cuda" if torch.cuda.is_available() else "cpu"
+    ):
+
         super(DreamWorld, self).__init__()
 
         # hyperparameters for training
         self.checkpoint_dir = checkpoint_dir
-        self.trajectory_length = trajectory_length
         self.batch_size = batch_size
         self.epochs = epochs
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
+        self.device = device
+
+        # for horizon planning
+        self.trajectory_length = trajectory_length
+        self.num_trajectories = num_trajectories
+        self.state_space = state_space
+        self.action_space = action_space
 
         # model architecture
         self.hidden_size = hidden_size
         self.reward_dim = reward_dim
+
+        action_dim = action_space.shape[0]
+        state_dim = state_space.shape[0]
         self.model = nn.Sequential(
             nn.Linear(state_dim + action_dim, self.hidden_size),
             nn.ReLU(),
@@ -62,10 +86,53 @@ class DreamWorld(nn.Module):
         self.optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
         self.loss_fn = nn.MSELoss()
 
+        self.to(self.device)
+
 
     def forward(self, state, action):
         x = torch.cat([state, action], dim=-1)
         return self.model(x)
+
+    def horizon_planning(self, state):
+        self.eval()
+
+        max_reward = float("-inf")
+        best_starting_action = None
+
+        # state comes from env.reset() / env.step() as a numpy array
+        initial_state = state.copy()
+
+        for _ in range(self.num_trajectories):
+            trajectory_reward = 0.0
+            current_state = initial_state.copy()  # numpy array or list
+            first_action = self.action_space.sample()  # numpy array
+            action = first_action
+
+            for _ in range(self.trajectory_length):
+                # convert to tensors on the right device
+                state_tensor = torch.tensor(current_state, dtype=torch.float32, device=self.device).unsqueeze(0)  # [1, state_dim]
+                action_tensor = torch.tensor(action, dtype=torch.float32, device=self.device).unsqueeze(0)  # [1, action_dim]
+
+                with torch.no_grad():
+                    pred = self.forward(state_tensor, action_tensor)[0]  # [state_dim + 1]
+
+                # next_state as plain Python list to avoid .numpy() issues
+                next_state = pred[:-1].detach().cpu().tolist()  # length = state_dim
+                reward = float(pred[-1].item())
+
+                current_state = next_state
+                trajectory_reward += reward
+
+                # random next action (you can later make this smarter)
+                action = self.action_space.sample()
+
+            if trajectory_reward > max_reward or best_starting_action is None:
+                max_reward = trajectory_reward
+                best_starting_action = first_action
+
+        return best_starting_action
+
+
 
     def train_model(self, dataset):
         self.train() # sets model to training mode
@@ -76,12 +143,12 @@ class DreamWorld(nn.Module):
             for start in range(0, len(dataset), self.batch_size):
                 batch = dataset[start:start + self.batch_size]
 
-                states = torch.tensor([item[0] for item in batch], dtype=torch.float32)
-                actions = torch.tensor([item[1] for item in batch], dtype=torch.float32)
-                rewards = torch.tensor([[item[2]] for item in batch], dtype=torch.float32)
-                next_states = torch.tensor([item[3] for item in batch], dtype=torch.float32)
-                dones = torch.tensor([[item[4]] for item in batch], dtype=torch.float32)
-    
+                states = torch.tensor([item[0] for item in batch], dtype=torch.float32, device=self.device)
+                actions = torch.tensor([item[1] for item in batch], dtype=torch.float32, device=self.device)
+                rewards = torch.tensor([[item[2]] for item in batch], dtype=torch.float32, device=self.device)
+                next_states = torch.tensor([item[3] for item in batch], dtype=torch.float32, device=self.device)
+                dones = torch.tensor([[item[4]] for item in batch], dtype=torch.float32, device=self.device)
+
                 pred = self.forward(states, actions)
                 pred_next_states = pred[:, :-1]
                 pred_rewards = pred[:, -1].unsqueeze(-1)
@@ -115,10 +182,11 @@ def main():
     parser.add_argument("--wandb_project", default="world-model", type=str, help="Weights & Biases project name")
     parser.add_argument("--wandb_entity", default=None, type=str, help="Weights & Biases entity name")
 
-    parser.add_argument("--max_episodes", default=1000, type=int, help="Number of episodes to run")
+    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu", type=str, help="Device to use: cpu or cuda")
+    parser.add_argument("--max_episodes", default=100, type=int, help="Number of episodes to run")
     parser.add_argument("--num_steps", default=50, type=int, help="Max steps per episode")
     parser.add_argument("--save_every_n_episodes", default=5, type=int, help="Save video every n episodes")
-    parser.add_argument("--dataset_size", default=500, type=int, help="Size of the dataset to collect")
+    parser.add_argument("--dataset_size", default=1000, type=int, help="Size of the dataset to collect")
 
     # DreamWorld specific arguments
     parser.add_argument("--num_trajectories", default=10, type=int, help="Number of trajectories to collect for DreamWorld")
@@ -156,26 +224,17 @@ def main():
     state_space = env.observation_space
     action_space = env.action_space
 
-    # agent does not train. Just random actions for data collection.
-    # agent = Agent(
-    #     state_space.shape[0],
-    #     action_space.shape[0],
-    #     hidden_size=args.agent_hidden_size,
-    #     learning_rate=args.agent_lr,
-    #     weight_decay=args.agent_weight_decay,
-    #     batch_size=args.agent_batch_size,
-    #     epochs=args.agent_epochs,
-    # )
-
     dream_world = DreamWorld(
-        state_dim=state_space.shape[0],
-        action_dim=action_space.shape[0],
+        state_space=state_space,
+        action_space=action_space,
         hidden_size=args.dreamworld_hidden_size,
         learning_rate=args.dreamworld_lr,
         batch_size=args.dreamworld_batch_size,
         epochs=args.dreamworld_epochs,
         weight_decay=args.dreamworld_weight_decay,
         checkpoint_dir=args.checkpoint_dir,
+        trajectory_length=args.trajectory_length,
+        num_trajectories=args.num_trajectories
     )
 
     dataset = [] # (state, action, reward, next_state, done)
@@ -190,37 +249,23 @@ def main():
         steps = 0
 
         while not done:
-            # agent makes an action
-            state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
-            # action = agent(state_tensor).detach().numpy()[0]
-            action = env.action_space.sample()  # Random action for data collection
+            if not use_dreamworld: # warmpup with realworld
+                action = env.action_space.sample() # random action
+            else:
+                # planned actions through horizons in dreamworld
+                # try num_trajectory trajectories of length trajectory_length and pick best one
+                action = dream_world.horizon_planning(state) 
 
-            # build dataset using realworld first.
-            if not use_dreamworld:
-                next_state, reward, terminated, truncated, info = env.step(action) # RealWorld Step
-                dataset.append((state, action, reward, next_state, terminated or truncated)) # build dataset
-            else: # use dreamworld to predict next state and reward
-                state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
-                action_tensor = torch.tensor(action, dtype=torch.float32).unsqueeze(0)
+            next_state, reward, terminated, truncated, info = env.step(action) # RealWorld Step
+            dataset.append((state, action, reward, next_state, terminated or truncated)) # build dataset
 
-                pred = dream_world(state_tensor, action_tensor)
-                next_state = pred[0, :-1].detach().cpu().tolist()
-                reward = float(pred[0, -1].detach().cpu())
-                terminated = False
-                truncated = False
-
-            # check if we now have enough data to train dreamworld
+            # train or retrain when dataset is large enough
             if len(dataset) >= args.dataset_size:
                 use_dreamworld = True
                 dream_world.train_model(dataset)
                 dataset = [] # clear dataset after training
 
-            # trajectory length cutoff for done
-            if use_dreamworld and steps >= args.trajectory_length: 
-                done = True
-            else:
-                done = terminated or truncated
-                
+            done = terminated or truncated    
             state = next_state
             total_reward += reward
             steps += 1

@@ -7,7 +7,7 @@ import os
 import numpy as np
 from main import DreamWorld
 
-def test_prediction_accuracy(env, dream_world, num_episodes=5, steps_per_episode=20):
+def test_prediction_accuracy(env, dream_world, num_episodes=20, steps_per_episode=50):
     """Compare real environment vs predicted environment over multiple steps"""
     
     print("\n=== Testing Prediction Accuracy ===")
@@ -25,8 +25,8 @@ def test_prediction_accuracy(env, dream_world, num_episodes=5, steps_per_episode
             real_next_state, real_reward, terminated, truncated, _ = env.step(action)
             
             # Get predicted transition
-            state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
-            action_tensor = torch.tensor(action, dtype=torch.float32).unsqueeze(0)
+            state_tensor = torch.tensor(state, dtype=torch.float32, device=dream_world.device).unsqueeze(0)
+            action_tensor = torch.tensor(action, dtype=torch.float32, device=dream_world.device).unsqueeze(0)
             pred = dream_world(state_tensor, action_tensor)
             pred_next_state = pred[0, :-1].detach().cpu().tolist()
             pred_reward = float(pred[0, -1].detach().cpu())
@@ -64,17 +64,16 @@ def test_dream_trajectory(dream_world, env, num_steps=15):
     
     for step in range(num_steps):
         action = env.action_space.sample()
-        
-        state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
-        action_tensor = torch.tensor(action, dtype=torch.float32).unsqueeze(0)
+        state_tensor = torch.tensor(state, dtype=torch.float32, device=dream_world.device).unsqueeze(0)
+        action_tensor = torch.tensor(action, dtype=torch.float32, device=dream_world.device).unsqueeze(0)
         pred = dream_world(state_tensor, action_tensor)
-        
+
         next_state = pred[0, :-1].detach().cpu().tolist()
         reward = float(pred[0, -1].detach().cpu())
-        
+
         dream_states.append(next_state)
         dream_rewards.append(reward)
-        
+
         state = next_state
     
     total_dream_reward = sum(dream_rewards)
@@ -112,8 +111,8 @@ def test_real_vs_dream(env, dream_world, num_steps=20):
     for step in range(len(real_states) - 1):  # Match real episode length
         action = env.action_space.sample()
         
-        state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
-        action_tensor = torch.tensor(action, dtype=torch.float32).unsqueeze(0)
+        state_tensor = torch.tensor(state, dtype=torch.float32, device=dream_world.device).unsqueeze(0)
+        action_tensor = torch.tensor(action, dtype=torch.float32, device=dream_world.device).unsqueeze(0)
         pred = dream_world(state_tensor, action_tensor)
         
         next_state = pred[0, :-1].detach().cpu().tolist()
@@ -157,32 +156,32 @@ def main():
     
     state_space = env.observation_space
     action_space = env.action_space
-    
-    # Load DreamWorld model
+
+    # Load DreamWorld model (new signature)
     dream_world = DreamWorld(
-        state_dim=state_space.shape[0],
-        action_dim=action_space.shape[0],
+        state_space=state_space,
+        action_space=action_space
     )
-    
+
     # Load checkpoint
-    checkpoint = torch.load(args.checkpoint)
+    checkpoint = torch.load(args.checkpoint, map_location=dream_world.device)
     dream_world.load_state_dict(checkpoint)
     dream_world.eval()
-    
+
     print(f"Loaded DreamWorld from {args.checkpoint}")
-    
+
     # Run tests
     state_error, reward_error = test_prediction_accuracy(env, dream_world, num_episodes=5, steps_per_episode=20)
-    
+
     dream_states, dream_rewards = test_dream_trajectory(dream_world, env, num_steps=args.trajectory_length)
-    
+
     real_rewards, dream_rewards_compare, state_diffs = test_real_vs_dream(env, dream_world, num_steps=args.trajectory_length)
-    
+
     print("\n=== Test Summary ===")
     print(f"Prediction State Error: {state_error:.6f}")
     print(f"Prediction Reward Error: {reward_error:.6f}")
     print(f"Dream vs Real State Divergence: {np.mean(state_diffs):.6f}")
-    
+
     env.close()
 
 
