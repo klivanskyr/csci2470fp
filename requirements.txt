@@ -3,3 +3,4 @@ gymnasium[mujoco]
 gymnasium[other]
 numpy
 mujoco==3.4.0
+wandb

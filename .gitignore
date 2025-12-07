@@ -3,3 +3,6 @@ conda/
 mujoco/
 set_env.sh
 output/
+__pycache__/
+checkpoints/
+wandb/
