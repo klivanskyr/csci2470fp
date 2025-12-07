@@ -7,6 +7,8 @@ import torch
 import torch.nn as nn
 import wandb
 
+from encoder import Encoder
+
 # Agent (state) -> action
 # class Agent(nn.Module):
 #     def __init__(self, state_dim, action_dim, hidden_size=128, learning_rate=1e-3, weight_decay=1e-5, batch_size=32, epochs=100):
@@ -224,6 +226,8 @@ def main():
     state_space = env.observation_space
     action_space = env.action_space
 
+    encoder = Encoder(observation_space_size=state_space.shape[0])
+
     dream_world = DreamWorld(
         state_space=state_space,
         action_space=action_space,
@@ -261,6 +265,10 @@ def main():
 
             # train or retrain when dataset is large enough
             if len(dataset) >= args.dataset_size:
+                # train encoder now with dataset
+                encoder.train(dataset)
+
+                ### 
                 use_dreamworld = True
                 dream_world.train_model(dataset)
                 dataset = [] # clear dataset after training
