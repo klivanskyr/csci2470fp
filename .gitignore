@@ -1,8 +1,10 @@
 # for hpc
 conda/
+mamba/
 mujoco/
 set_env.sh
 output/
 __pycache__/
 checkpoints/
 wandb/
+videos/

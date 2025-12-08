@@ -1,8 +1,10 @@
+import torch
 import torch.nn as nn
 
 class LatentDynamics(nn.Module):
-    def __init__(self, latent_size, action_size, hidden_size=64):
+    def __init__(self, latent_size, action_size, hidden_size=64, device="cuda" if torch.cuda.is_available() else "cpu"):
         super(LatentDynamics, self).__init__()
+        self.to(device)
 
         self.model = nn.Sequential(
             nn.Linear(latent_size + action_size, hidden_size),

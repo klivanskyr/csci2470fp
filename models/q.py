@@ -1,9 +1,11 @@
+import torch
 import torch.nn as nn
-import copy
 
 class Q(nn.Module):
-    def __init__(self, latent_size, action_size, hidden_size=64):
+    def __init__(self, latent_size, action_size, hidden_size=64, device="cuda" if torch.cuda.is_available() else "cpu"):
         super(Q, self).__init__()
+        self.device = device
+        self.to(device)
         
         self.model = nn.Sequential(
             nn.Linear(latent_size + action_size, hidden_size),
