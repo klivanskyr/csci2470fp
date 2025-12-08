@@ -2,6 +2,7 @@ import gymnasium as gym
 from gymnasium.wrappers import RecordVideo, TimeLimit
 import torch
 import wandb
+import os
 
 from helpers.replay_buffer import ReplayBuffer
 from models.tdmpc import TDMPC
@@ -25,6 +26,7 @@ config = {
     "episode_length": 50,
     "latent_size": 32,
     "hidden_size": 128,
+    "batch_size": 64,
     "horizon_steps": 5,
     "iterations": 4,
     "num_elites": 16,
@@ -32,6 +34,8 @@ config = {
     "eval_interval": 1000,
     "eval_episodes": 5,
     "num_episodes": 1000,
+    "checkpoint_dir": "./checkpoints",
+    "checkpoint_interval": 1000,  # Save checkpoint every N steps
 }
 
 # Initialize wandb
@@ -41,6 +45,9 @@ wandb.init(project="tdmpc-training", config=config)
 wandb.config.update(config)
 
 def train():
+    # Create checkpoint directory if it doesn't exist
+    os.makedirs(config["checkpoint_dir"], exist_ok=True)
+    
     env = gym.make("Reacher-v5", render_mode="rgb_array")
     env = TimeLimit(env.unwrapped, max_episode_steps=config["episode_length"])
     env = RecordVideo(env, video_folder="./videos", episode_trigger=lambda x: x % 5 == 0)
@@ -58,7 +65,7 @@ def train():
         num_elites=config["num_elites"],
     )
 
-    replay_buffer = ReplayBuffer(horizon_size=config["horizon_steps"], state_size=state_size, action_size=action_size, num_episodes=config["num_episodes"], episode_size=config["episode_length"], device=model.device)
+    replay_buffer = ReplayBuffer(horizon_size=config["horizon_steps"], state_size=state_size, action_size=action_size, num_episodes=config["num_episodes"], episode_size=config["episode_length"], batch_size=config["batch_size"], device=model.device)
 
     # collect inital data for replay buffer by taking random actions from the real env
     episode_idx = 0
@@ -124,7 +131,20 @@ def train():
         if episode_idx % (config["eval_interval"] // config["episode_length"]) == 0:
             metrics = evaluate(env, model, step)
             wandb.log(metrics)
+        
+        # Save checkpoint at regular intervals
+        if step > 0 and step % config["checkpoint_interval"] == 0:
+            checkpoint_path = os.path.join(config["checkpoint_dir"], f"tdmpc_step_{step}.pth")
+            torch.save(model.state_dict(), checkpoint_path)
+            print(f"Saved checkpoint: {checkpoint_path}")
+            wandb.save(checkpoint_path)
 
+    # Save final checkpoint
+    final_checkpoint_path = os.path.join(config["checkpoint_dir"], "tdmpc_final.pth")
+    torch.save(model.state_dict(), final_checkpoint_path)
+    print(f"Saved final checkpoint: {final_checkpoint_path}")
+    wandb.save(final_checkpoint_path)
+    
     print("Training completed.")
     wandb.finish()
 

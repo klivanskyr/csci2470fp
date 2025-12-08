@@ -19,8 +19,8 @@ class Policy(nn.Module):
         self.optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
     
     def forward(self, latent, use_std=False):
+        mu = torch.tanh(self.model(latent))  # Bound output to [-1, 1]
         if use_std:
-            noise = torch.randn_like(self.model(latent)) * self.std
-            return self.model(latent) + noise
-
-        return self.model(latent)
+            noise = torch.randn_like(mu) * self.std
+            return torch.clamp(mu + noise, -1, 1)  # Keep in bounds after noise
+        return mu
