@@ -22,15 +22,15 @@ from models.tdmpc import TDMPC
 # }
 
 config = {
-    "train_steps": 10000,
+    "train_steps": 25000,
     "episode_length": 50,
     "latent_size": 32,
     "hidden_size": 128,
     "batch_size": 64,
     "horizon_steps": 5,
-    "iterations": 4,
-    "num_elites": 16,
-    "warmup_steps": 500,
+    "iterations": 6,
+    "num_elites": 64,
+    "warmup_steps": 2000,
     "eval_interval": 1000,
     "eval_episodes": 5,
     "num_episodes": 1000,
@@ -63,6 +63,7 @@ def train():
         horizon_steps=config["horizon_steps"],
         iterations=config["iterations"],
         num_elites=config["num_elites"],
+        duration=config["train_steps"],
     )
 
     replay_buffer = ReplayBuffer(horizon_size=config["horizon_steps"], state_size=state_size, action_size=action_size, num_episodes=config["num_episodes"], episode_size=config["episode_length"], batch_size=config["batch_size"], device=model.device)
@@ -128,12 +129,12 @@ def train():
                 wandb.log(metrics)
 
         # Evaluate agent every while
-        if episode_idx % (config["eval_interval"] // config["episode_length"]) == 0:
+        if not model.in_warmup_phase and episode_idx % (config["eval_interval"] // config["episode_length"]) == 0:
             metrics = evaluate(env, model, step)
             wandb.log(metrics)
         
         # Save checkpoint at regular intervals
-        if step > 0 and step % config["checkpoint_interval"] == 0:
+        if not model.in_warmup_phase and step > 0 and step % config["checkpoint_interval"] == 0:
             checkpoint_path = os.path.join(config["checkpoint_dir"], f"tdmpc_step_{step}.pth")
             torch.save(model.state_dict(), checkpoint_path)
             print(f"Saved checkpoint: {checkpoint_path}")

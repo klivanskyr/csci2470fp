@@ -12,7 +12,7 @@ class RewardModel(nn.Module):
             nn.ELU(),
             nn.Linear(hidden_size, hidden_size),
             nn.ELU(),
-            nn.Linear(hidden_size, 1)
+            nn.Linear(hidden_size, 1),
         )
 
     def forward(self, latent, action):
