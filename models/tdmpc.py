@@ -7,7 +7,7 @@ import numpy as np
 from .told import Told
 
 class TDMPC(nn.Module):
-    def __init__(self, latent_size, action_size, state_size, hidden_size=64, horizon_steps:int=5, learning_rate=1e-3, temperature=0.01, tau=0.5, iterations=6, mixture_coeff=0.05, num_samples=256, rho=0.9, c1=0.5, c2=0.1, c3=2, temporal_coeff=0.5, discount_factor=0.99, num_elites=32, momentum=0.1, min_std=0.05, device="cuda" if torch.cuda.is_available() else "cpu", grad_clip_norm=10.0, target_update_interval=2, duration=25000):
+    def __init__(self, action_size, state_size, latent_size=64, hidden_size=64, horizon_steps:int=5, learning_rate=1e-3, temperature=0.5, tau=0.01, iterations=6, mixture_coeff=0.05, num_samples=256, rho=0.9, c1=0.5, c2=0.1, c3=2, temporal_coeff=0.5, discount_factor=0.99, num_elites=64, momentum=0.1, min_std=0.05, device="cuda" if torch.cuda.is_available() else "cpu", grad_clip_norm=10.0, target_update_interval=2, duration=25000):
         super(TDMPC, self).__init__()
 
         self.model = Told(latent_size, action_size, state_size, hidden_size, horizon_steps, learning_rate)
@@ -54,6 +54,12 @@ class TDMPC(nn.Module):
 
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
 
+    # for infernace use the policy
+    def forward(self, state):
+        with torch.no_grad():
+            action = self.model.policy(self.model.h(state), use_std=False)
+        return action
+    
     def update_target_model(self):
         with torch.no_grad():
             for p, p_target in zip(self.model.parameters(), self.target_model.parameters()):

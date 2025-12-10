@@ -22,10 +22,10 @@ from models.tdmpc import TDMPC
 # }
 
 config = {
-    "train_steps": 25000,
+    "train_steps": 50000,
     "episode_length": 50,
-    "latent_size": 32,
-    "hidden_size": 128,
+    "latent_size": 64,
+    "hidden_size": 256,
     "batch_size": 64,
     "horizon_steps": 5,
     "iterations": 6,
@@ -33,6 +33,7 @@ config = {
     "warmup_steps": 2000,
     "eval_interval": 1000,
     "eval_episodes": 5,
+    "num_samples": 512,
     "num_episodes": 1000,
     "checkpoint_dir": "./checkpoints",
     "checkpoint_interval": 1000,  # Save checkpoint every N steps
@@ -64,6 +65,7 @@ def train():
         iterations=config["iterations"],
         num_elites=config["num_elites"],
         duration=config["train_steps"],
+        num_samples=config["num_samples"],
     )
 
     replay_buffer = ReplayBuffer(horizon_size=config["horizon_steps"], state_size=state_size, action_size=action_size, num_episodes=config["num_episodes"], episode_size=config["episode_length"], batch_size=config["batch_size"], device=model.device)
@@ -124,7 +126,7 @@ def train():
         if step >= config["warmup_steps"]:
             print("Training model... @ step ", step)
             model.in_warmup_phase = False
-            for _ in range(config["episode_length"]):
+            for _ in range(config["episode_length"] * 2): # update more for better initial training
                 metrics = model.update(replay_buffer, step)
                 wandb.log(metrics)
 
